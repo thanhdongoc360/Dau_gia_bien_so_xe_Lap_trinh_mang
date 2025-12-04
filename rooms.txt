@@ -1,0 +1,5 @@
+1 room1 1 admin
+2 room2CREATE_ROOM 0 admin
+3 room2 1 admin
+4 room1 1 admin
+5 room2 1 admin

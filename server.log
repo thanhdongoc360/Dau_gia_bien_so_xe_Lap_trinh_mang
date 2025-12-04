@@ -1,0 +1,96 @@
+[2025-11-24 16:15:50] SERVER_START port=12345
+[2025-11-24 16:16:28] REGISTER user=u1
+[2025-11-24 16:16:44] REGISTER user=u2
+[2025-11-24 16:17:27] LOGIN user=u1 role=user
+[2025-11-24 16:18:02] LOGOUT user=u1
+[2025-11-24 16:18:18] LOGIN user=u1 role=user
+[2025-11-24 16:18:39] LOGIN user=admin role=admin
+[2025-11-24 16:18:53] CREATE_ROOM admin=admin room_id=1 name=room1
+[2025-11-24 16:19:10] CREATE_ROOM admin=admin room_id=2 name=room2CREATE_ROOM
+[2025-11-24 16:19:17] CREATE_ROOM admin=admin room_id=3 name=room2
+[2025-11-24 16:20:14] CLOSE_ROOM admin=admin room_id=2
+[2025-11-24 16:21:20] JOIN_ROOM user=u1 room_id=1
+[2025-11-24 16:21:46] LEAVE_ROOM user=u1 room_id=1
+[2025-11-24 16:23:03] JOIN_ROOM user=admin room_id=1
+[2025-11-24 16:23:24] ADD_ITEM admin=admin room_id=1 item_id=1 plate=30A12345 start=100 step=10 buy=500
+[2025-11-24 16:23:42] ADD_ITEM admin=admin room_id=1 item_id=2 plate=29B88888 start=200 step=20 buy=800
+[2025-11-24 16:24:24] SOLD_TIMEOUT room_id=1 item_id=1 plate=30A12345 winner=None price=100
+[2025-11-24 16:24:42] SOLD_TIMEOUT room_id=1 item_id=2 plate=29B88888 winner=None price=200
+[2025-11-24 16:25:04] JOIN_ROOM user=u1 room_id=1
+[2025-11-24 16:26:58] CHANGE_PASS user=u1
+[2025-11-24 16:27:04] LEAVE_ROOM user=u1 room_id=1 (logout)
+[2025-11-24 16:27:04] LOGOUT user=u1
+[2025-11-24 16:27:11] LOGIN user=u1 role=user
+[2025-11-24 16:27:21] CHANGE_NAME user=u1 new=vua_daugia
+[2025-11-24 16:29:16] LEAVE_ROOM user=admin room_id=1 (disconnect)
+[2025-11-24 16:29:16] LOGOUT user=admin
+[2025-11-24 16:32:21] LOGOUT user=u1
+[2025-11-24 16:48:45] SERVER_START port=12345
+[2025-11-24 16:49:29] REGISTER user=u3
+[2025-11-28 13:52:13] SERVER_START port=12345
+[2025-11-28 13:53:44] REGISTER user=user4
+[2025-11-28 13:54:05] LOGIN user=user1 role=user
+[2025-11-28 13:59:38] LOGOUT user=user1
+[2025-11-29 01:19:32] SERVER_START port=12345
+[2025-11-29 01:21:42] LOGIN user=admin role=admin
+[2025-11-29 01:21:51] LOGIN user=user1 role=user
+[2025-11-29 01:22:00] LOGIN user=user2 role=user
+[2025-11-29 01:22:26] CREATE_ROOM admin=admin room_id=4 name=room1
+[2025-11-29 01:23:01] CREATE_ROOM admin=admin room_id=5 name=room2
+[2025-11-29 01:24:05] CLOSE_ROOM admin=admin room_id=1
+[2025-11-29 01:24:18] OPEN_ROOM admin=admin room_id=1
+[2025-11-29 01:26:53] LOGOUT user=user1
+[2025-11-29 01:27:09] LOGOUT user=user2
+[2025-11-29 01:29:20] LOGOUT user=admin
+[2025-11-29 01:43:11] LOGIN user=admin role=admin
+[2025-11-29 01:43:39] LOGIN user=user1 role=user
+[2025-11-29 01:43:51] LOGIN user=user2 role=user
+[2025-11-29 01:44:53] JOIN_ROOM user=admin room_id=1
+[2025-11-29 01:45:22] LEAVE_ROOM user=admin room_id=1
+[2025-11-29 01:45:36] JOIN_ROOM user=admin room_id=1
+[2025-11-29 01:45:47] ADD_ITEM admin=admin room_id=1 item_id=3 plate=30A12345 start=100 step=10 buy=500
+[2025-11-29 01:45:51] ADD_ITEM admin=admin room_id=1 item_id=4 plate=29B88888 start=200 step=20 buy=800
+[2025-11-29 01:46:19] JOIN_ROOM user=user1 room_id=1
+[2025-11-29 01:46:29] JOIN_ROOM user=user2 room_id=1
+[2025-11-29 01:46:47] SOLD_TIMEOUT room_id=1 item_id=3 plate=30A12345 winner=None price=100
+[2025-11-29 01:46:51] SOLD_TIMEOUT room_id=1 item_id=4 plate=29B88888 winner=None price=200
+[2025-11-29 01:48:37] ADD_ITEM admin=admin room_id=1 item_id=5 plate=30A12345 start=100 step=10 buy=500
+[2025-11-29 01:49:37] SOLD_TIMEOUT room_id=1 item_id=5 plate=30A12345 winner=None price=100
+[2025-11-29 01:50:11] ADD_ITEM admin=admin room_id=1 item_id=6 plate=29B88888 start=200 step=20 buy=800
+[2025-11-29 01:51:11] SOLD_TIMEOUT room_id=1 item_id=6 plate=29B88888 winner=None price=200
+[2025-11-29 01:51:44] LEAVE_ROOM user=user2 room_id=1 (disconnect)
+[2025-11-29 01:51:44] LOGOUT user=user2
+[2025-11-29 01:52:03] LOGIN user=user2 role=user
+[2025-11-29 01:52:44] ADD_ITEM admin=admin room_id=1 item_id=7 plate=29B11111 start=100 step=10 buy=500
+[2025-11-29 01:53:09] BID user=user1 room_id=1 item_id=7 amount=110
+[2025-11-29 01:53:29] JOIN_ROOM user=user2 room_id=1
+[2025-11-29 01:53:33] BID user=user2 room_id=1 item_id=7 amount=150
+[2025-11-29 01:53:42] TIME_EXTENDED room_id=1 item_id=7 +5s
+[2025-11-29 01:53:42] BID user=user1 room_id=1 item_id=7 amount=500
+[2025-11-29 01:53:49] SOLD_TIMEOUT room_id=1 item_id=7 plate=29B11111 winner=user1 price=500
+[2025-11-29 01:55:33] LEAVE_ROOM user=user1 room_id=1
+[2025-11-29 01:55:45] CHANGE_PASS user=user1
+[2025-11-29 01:55:52] CHANGE_PASS user=user1
+[2025-11-29 01:56:08] CHANGE_NAME user=user1 new=USER1
+[2025-11-29 01:56:15] CHANGE_NAME user=user1 new=USER01
+[2025-12-02 05:49:23] SERVER_START port=12345
+[2025-12-02 05:49:51] LOGIN user=admin role=admin
+[2025-12-02 05:50:03] LOGIN user=user1 role=user
+[2025-12-02 05:50:16] LOGIN user=user2 role=user
+[2025-12-02 05:51:35] OPEN_ROOM admin=admin room_id=1
+[2025-12-02 05:51:57] JOIN_ROOM user=admin room_id=1
+[2025-12-02 05:52:33] JOIN_ROOM user=user1 room_id=1
+[2025-12-02 05:52:39] JOIN_ROOM user=user2 room_id=1
+[2025-12-02 05:53:05] ADD_ITEM admin=admin room_id=1 item_id=8 plate=30A12345 start=100 step=10 buy=500
+[2025-12-02 05:54:05] SOLD_TIMEOUT room_id=1 item_id=8 plate=30A12345 winner=None price=100
+[2025-12-02 05:54:37] ADD_ITEM admin=admin room_id=1 item_id=9 plate=30A12345 start=100 step=10 buy=500
+[2025-12-02 05:55:24] BID user=user1 room_id=1 item_id=9 amount=110
+[2025-12-02 05:55:36] TIME_EXTENDED room_id=1 item_id=9 +5s
+[2025-12-02 05:55:36] BID user=user2 room_id=1 item_id=9 amount=500
+[2025-12-02 05:55:42] SOLD_TIMEOUT room_id=1 item_id=9 plate=30A12345 winner=user2 price=500
+[2025-12-02 05:59:44] LEAVE_ROOM user=admin room_id=1 (disconnect)
+[2025-12-02 05:59:44] LOGOUT user=admin
+[2025-12-02 06:00:33] LEAVE_ROOM user=user1 room_id=1 (disconnect)
+[2025-12-02 06:00:33] LOGOUT user=user1
+[2025-12-02 06:00:49] LEAVE_ROOM user=user2 room_id=1 (disconnect)
+[2025-12-02 06:00:49] LOGOUT user=user2
