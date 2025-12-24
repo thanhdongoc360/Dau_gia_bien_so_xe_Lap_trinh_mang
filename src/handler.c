@@ -206,6 +206,25 @@ void *handle_client(void *arg) {
             }
         }
 
+        // PROMOTE_TO_ADMIN (admin only)
+        else if (strncmp(buffer, "PROMOTE_TO_ADMIN", 16) == 0) {
+            if (strlen(username) == 0) send(client_sock, "NEED_LOGIN\n", 11, 0);
+            else if (strcmp(role, "admin") != 0) send(client_sock, "PERMISSION_DENIED\n", 18, 0);
+            else {
+                char target[50];
+                sscanf(buffer, "PROMOTE_TO_ADMIN %49s", target);
+                
+                int res = promote_user_to_admin(target, username);
+                if (res == 1) send(client_sock, "PROMOTE_OK\n", 11, 0);
+                else if (res == -1) send(client_sock, "PROMOTE_ALREADY_ADMIN\n", 22, 0);
+                else send(client_sock, "PROMOTE_FAIL\n", 13, 0);
+                
+                if (res == 1) {
+                    log_event("PROMOTE_TO_ADMIN user=%s promoted_by=%s", target, username);
+                }
+            }
+        }
+
         // LEAVE_ROOM
         else if (strncmp(buffer, "LEAVE_ROOM", 10) == 0) {
             if (strlen(username) == 0) send(client_sock, "NEED_LOGIN\n", 11, 0);

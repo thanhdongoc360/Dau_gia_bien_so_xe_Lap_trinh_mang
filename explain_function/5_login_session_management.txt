@@ -1,0 +1,486 @@
+Đăng Nhập & Quản Lý Phiên (Login & Session Management)
+
+=== 1. Tổng Quan Kiến Trúc ===
+
+Hệ thống gồm 2 tầng quản lý:
+
+┌─────────────────────────────────────────────────────┐
+│ Tầng 1: Users Array (users[])                       │
+│ ├─ username, password, role, display_name           │
+│ └─ online flag (0=offline, 1=online)                │
+│ → Kiểm tra mật khẩu, set online flag                │
+│ → Lưu vào file users.txt (bền vững)                 │
+│                                                     │
+│ Tầng 2: Sessions Array (sessions[])                 │
+│ ├─ socket, username, role, active                   │
+│ → Bản đồ socket hiện tại → username                 │
+│ → Dùng để broadcast, kiểm tra quyền                 │
+│ → Không lưu file (tạm thời, mất khi restart)        │
+└─────────────────────────────────────────────────────┘
+
+Mục đích:
+- users[]: lưu trữ thông tin người dùng, kiểm tra password
+- sessions[]: theo dõi ai đang online TẠI THỜI ĐIỂM HIỆN TẠI (cho broadcast/quyền)
+
+
+=== 2. Cấu Trúc Dữ Liệu ===
+
+File: include/common.h
+
+typedef struct {
+    char username[50];
+    char password[50];
+    char role[10];        // "admin" / "user"
+    char display_name[50];
+    int  online;
+} User;
+
+Giải thích:
+- username: ID duy nhất của user (max 49 ký tự)
+- password: mật khẩu (plain text, không mã hoá - điểm yếu an toàn)
+- role: "admin" hoặc "user" (xác định quyền)
+- display_name: tên hiển thị (có thể đổi khác username)
+- online: 0=offline, 1=online (khi login/logout)
+
+
+typedef struct {
+    int sock;
+    char username[50];
+    char role[10];
+    int active;
+} ClientSession;
+
+Giải thích:
+- sock: file descriptor socket của client (để send())
+- username: ai đang dùng socket này
+- role: cache role để tránh đọc users[] mỗi lần check quyền
+- active: 1=phiên hoạt động, 0=trống/logout
+
+Global:
+    ClientSession sessions[MAX_CLIENTS];  // MAX_CLIENTS = 100
+    pthread_mutex_t users_mutex, sessions_mutex;
+
+
+=== 3. Quy Trình Đăng Nhập (LOGIN) ===
+
+3.1. Luồng Tổng Thể
+───────────────────
+
+Client gửi lệnh:
+    LOGIN user1 123456
+    
+Server (handler.c):
+    1. Parse lệnh → username="user1", password="123456"
+    2. Gọi login_user(u, p, role_out)
+    3. Nếu OK: gọi update_session_login() + gửi LOGIN_OK
+    4. Nếu fail: gửi lỗi
+
+
+3.2. Chi Tiết Handler (src/handler.c, dòng 51-68)
+──────────────────────────────────────────────────
+
+else if (strncmp(buffer, "LOGIN", 5) == 0) {
+    char u[50], p[50];
+    sscanf(buffer, "LOGIN %49s %49s", u, p);
+    
+    int res = login_user(u, p, role);
+    
+    if (res == 1) {
+        strcpy(username, u);  // Lưu username vào biến thread-local
+        update_session_login(client_sock, username, role);  // Cập nhật session
+        char msg[100];
+        sprintf(msg, "LOGIN_OK %s\n", role);
+        send(client_sock, msg, strlen(msg), 0);  // Gửi phản hồi
+    } else if (res == -1) {
+        send(client_sock, "LOGIN_FAIL_ALREADY_ONLINE\n", 26, 0);  // Đã online
+    } else {
+        send(client_sock, "LOGIN_FAIL\n", 11, 0);  // Sai pass/user
+    }
+}
+
+Biến thread-local (trong handle_client()):
+    char username[50] = "";  // Lưu username thread này đang phục vụ
+    char role[10] = "";      // Lưu role của user
+
+Ý nghĩa:
+    - username/role được giữ trong suốt vòng lặp, dùng để kiểm tra lệnh tiếp theo
+    - Nếu lệnh BID/JOIN → kiểm tra username[0] != '\0' → có login chưa
+
+
+3.3. Chi Tiết login_user() (src/users.c, dòng 68-84)
+────────────────────────────────────────────────────
+
+int login_user(char *username, char *password, char *role_out) {
+    pthread_mutex_lock(&users_mutex);  // ← An toàn luồng
+    
+    // Duyệt mảy users tìm username + password
+    for (int i = 0; i < user_count; i++) {
+        if (strcmp(users[i].username, username) == 0 &&
+            strcmp(users[i].password, password) == 0)
+        {
+            // Kiểm tra đã online chưa (1 user chỉ ở 1 chỗ)
+            if (users[i].online) {
+                pthread_mutex_unlock(&users_mutex);
+                return -1;  // ← ALREADY_ONLINE
+            }
+            
+            // Đặt online=1
+            users[i].online = 1;
+            
+            // Trích role ra để truyền cho handler
+            strcpy(role_out, users[i].role);
+            
+            pthread_mutex_unlock(&users_mutex);
+            
+            // Ghi log
+            log_event("LOGIN user=%s role=%s", username, role_out);
+            return 1;  // ← Thành công
+        }
+    }
+    
+    pthread_mutex_unlock(&users_mutex);
+    return 0;  // ← Username hoặc password sai
+}
+
+Chi tiết:
+a) Lock mutex users_mutex
+   → Tránh race condition nếu 2 client cùng login user1 một lúc
+   
+b) Duyệt users[] tìm username + password
+   → strcmp(a, b) == 0 → a bằng b
+   
+c) Kiểm tra users[i].online == 1
+   → Nếu đã online → return -1 (ALREADY_ONLINE)
+   → Ngăn 1 user login từ 2 client cùng lúc
+   
+d) Set users[i].online = 1
+   → Đánh dấu user này đã online
+   
+e) strcpy(role_out, users[i].role)
+   → Copy role ("admin" / "user") ra ngoài để handler dùng
+   
+f) Unlock mutex
+   
+g) log_event(...) → ghi log
+   
+h) return 1 (success)
+
+Nếu không tìm → return 0 (sai username/password)
+
+
+3.4. Chi Tiết update_session_login() (src/session.c, dòng 8-25)
+──────────────────────────────────────────────────────────────
+
+void update_session_login(int sock, const char *username, const char *role) {
+    pthread_mutex_lock(&sessions_mutex);  // ← An toàn luồng
+    
+    int idx = -1;
+    
+    // Tìm slot trống hoặc slot với socket này
+    for (int i = 0; i < MAX_CLIENTS; i++) {
+        if (sessions[i].active && sessions[i].sock == sock) {
+            idx = i;  // ← Slot socket đã tồn tại
+            break;
+        }
+        if (!sessions[i].active && idx == -1) {
+            idx = i;  // ← Slot trống đầu tiên
+        }
+    }
+    
+    // Nếu tìm được slot, cập nhật
+    if (idx != -1) {
+        sessions[idx].sock = sock;
+        sessions[idx].active = 1;
+        strncpy(sessions[idx].username, username, sizeof(...)-1);
+        strncpy(sessions[idx].role, role, sizeof(...)-1);
+        sessions[idx].username[sizeof(...)-1] = '\0';
+        sessions[idx].role[sizeof(...)-1] = '\0';
+    }
+    
+    pthread_mutex_unlock(&sessions_mutex);
+}
+
+Ý nghĩa:
+- Tạo bản đồ socket → username → role
+- Dùng cho broadcast_to_room() để biết user nào ở phòng nào
+- Dùng để kiểm tra quyền admin nhanh (không cần read users[] mỗi lần)
+
+Ví dụ sau LOGIN:
+    sessions[] = [
+        { sock=4, username="admin", role="admin", active=1 },
+        { sock=5, username="user1", role="user", active=1 },
+        { sock=-1, active=0 },
+        ...
+    ]
+
+
+=== 4. Quy Trình Đăng Xuất (LOGOUT) ===
+
+4.1. Luồng Tổng Thể
+───────────────────
+
+Client gửi:
+    LOGOUT
+
+Server:
+    1. Kiểm tra đã login
+    2. Rời phòng nếu đang ở (broadcast USER_LEAVE)
+    3. Gọi logout_user() → set online=0
+    4. Gọi remove_session() → xoá session
+    5. Gửi LOGOUT_OK
+
+
+4.2. Chi Tiết Handler (src/handler.c, dòng 69-87)
+──────────────────────────────────────────────────
+
+else if (strncmp(buffer, "LOGOUT", 6) == 0) {
+    if (strlen(username) == 0) {
+        send(client_sock, "NEED_LOGIN\n", 11, 0);
+    } else {
+        // Rời phòng nếu đang ở
+        pthread_mutex_lock(&rooms_mutex);
+        int left = leave_room_and_getid(username);
+        if (left) {
+            char bmsg[128];
+            snprintf(bmsg, sizeof(bmsg),
+                     "USER_LEAVE %s room %d\n", username, left);
+            broadcast_to_room_nolock(left, bmsg);
+            log_event("LEAVE_ROOM user=%s room_id=%d (logout)", username, left);
+        }
+        pthread_mutex_unlock(&rooms_mutex);
+        
+        // Logout
+        logout_user(username);
+        remove_session(client_sock);
+        
+        send(client_sock, "LOGOUT_OK\n", 10, 0);
+        username[0] = '\0';  // Xoá username thread-local
+        role[0] = '\0';
+    }
+}
+
+Chi tiết:
+a) Kiểm tra username[0] != '\0' → có login chưa
+b) Rời phòng: leave_room_and_getid(username) → xoá khỏi members
+c) Broadcast USER_LEAVE cho phòng
+d) logout_user(username) → set online=0
+e) remove_session(client_sock) → xoá khỏi sessions[]
+f) Xoá username/role thread-local
+
+
+4.3. Chi Tiết logout_user() (src/users.c, dòng 91-100)
+──────────────────────────────────────────────────────
+
+void logout_user(char *username) {
+    pthread_mutex_lock(&users_mutex);
+    for (int i = 0; i < user_count; i++) {
+        if (strcmp(users[i].username, username) == 0) {
+            users[i].online = 0;  // ← Đặt offline
+            break;
+        }
+    }
+    pthread_mutex_unlock(&users_mutex);
+    log_event("LOGOUT user=%s", username);
+}
+
+Đơn giản: set online=0 trong mảy users[]
+
+
+4.4. Chi Tiết remove_session() (src/session.c, dòng 27-37)
+───────────────────────────────────────────────────────────
+
+void remove_session(int sock) {
+    pthread_mutex_lock(&sessions_mutex);
+    for (int i = 0; i < MAX_CLIENTS; i++) {
+        if (sessions[i].active && sessions[i].sock == sock) {
+            sessions[i].active = 0;
+            sessions[i].username[0] = '\0';
+            sessions[i].role[0] = '\0';
+            sessions[i].sock = -1;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&sessions_mutex);
+}
+
+Xoá session khỏi sessions[]
+
+
+=== 5. Quy Trình Ngắt Kết Nối (Disconnect) ===
+
+Khi client đóng socket hoặc timeout (5 phút):
+    
+    recv() trả n <= 0 → break khỏi while loop
+    
+Handler dọn dẹp (cuối hàm):
+
+    if (strlen(username) > 0) {
+        // Rời phòng
+        pthread_mutex_lock(&rooms_mutex);
+        int left = leave_room_and_getid(username);
+        if (left) {
+            char bmsg[128];
+            snprintf(bmsg, sizeof(bmsg), "USER_LEAVE %s room %d\n", username, left);
+            broadcast_to_room_nolock(left, bmsg);
+            log_event("LEAVE_ROOM user=%s room_id=%d (disconnect)", username, left);
+        }
+        pthread_mutex_unlock(&rooms_mutex);
+        logout_user(username);
+    }
+    
+    remove_session(client_sock);
+    close(client_sock);
+    pthread_exit(NULL);
+
+→ Tự động logout + rời phòng khi disconnect
+
+
+=== 6. Kiểm Tra Quyền (Permission Check) ===
+
+Mỗi lệnh admin yêu cầu:
+
+    if (strcmp(role, "admin") != 0) {
+        send(client_sock, "PERMISSION_DENIED\n", 18, 0);
+        continue;  // ← Bỏ qua lệnh
+    }
+
+Ví dụ (CREATE_ROOM):
+
+    else if (strncmp(buffer, "CREATE_ROOM", 11) == 0) {
+        if (strlen(username) == 0) send(client_sock, "NEED_LOGIN\n", 11, 0);
+        else if (strcmp(role, "admin") != 0) send(client_sock, "PERMISSION_DENIED\n", 18, 0);
+        else {
+            // Thực thi lệnh
+        }
+    }
+
+→ Lệnh admin: CREATE_ROOM, OPEN_ROOM, CLOSE_ROOM, ADD_ITEM, REMOVE_ITEM, PROMOTE_TO_ADMIN
+
+
+=== 7. Trạng Thái Một Phiên Hoàn Chỉnh ===
+
+Bước 1: Trước login
+─────────────────
+
+handler.c (thread-local):
+    username = ""
+    role = ""
+
+users.txt:
+    admin admin123 admin admin
+    user1 123456 user user1
+
+users[]:
+    [0] = {username="admin", password="admin123", role="admin", online=0}
+    [1] = {username="user1", password="123456", role="user", online=0}
+
+sessions[]:
+    [0,1,2,...] = {sock=-1, active=0}
+
+
+Bước 2: Client gửi LOGIN user1 123456
+───────────────────────────────────────
+
+Sau login_user():
+    users[1].online = 1  ← Đặt online
+
+Sau update_session_login(client_sock=5, "user1", "user"):
+    sessions[0] = {sock=5, username="user1", role="user", active=1}
+
+handler.c (thread-local):
+    username = "user1"
+    role = "user"
+
+Server phản hồi:
+    LOGIN_OK user
+
+Log:
+    [2025-12-22 10:50:00] LOGIN user=user1 role=user
+
+
+Bước 3: Client gửi LOGOUT
+──────────────────────────
+
+Sau logout_user():
+    users[1].online = 0  ← Đặt offline
+
+Sau remove_session():
+    sessions[0] = {sock=-1, username="", role="", active=0}
+
+handler.c (thread-local):
+    username = ""
+    role = ""
+
+Server phản hồi:
+    LOGOUT_OK
+
+Log:
+    [2025-12-22 10:50:30] LOGOUT user=user1
+
+
+=== 8. An Toàn Luồng (Thread Safety) ===
+
+Mutex bảo vệ:
+
+users_mutex:
+    - login_user() (đọc/ghi online flag)
+    - logout_user() (ghi online flag)
+    - register_user() (thêm user)
+    - change_password() (sửa password)
+    - change_display_name() (sửa tên)
+    - promote_user_to_admin() (sửa role)
+
+sessions_mutex:
+    - update_session_login() (thêm session)
+    - remove_session() (xoá session)
+    - broadcast_to_room_nolock() (duyệt sessions)
+
+Race condition nếu không có mutex:
+
+    Thread 1: LOGIN user1              Thread 2: LOGIN user1 (cùng lúc)
+    ┌─────────────────────┐            ┌─────────────────────┐
+    │ Read online = 0     │            │                     │
+    │ (OK)                │            │ Read online = 0     │
+    │                     │            │ (OK)                │
+    │ Set online = 1      │            │                     │
+    │ session[0] active   │            │ Set online = 1      │
+    │                     │            │ session[1] active   │
+    └─────────────────────┘            └─────────────────────┘
+    
+    → Cả 2 thread đều thấy user1 online!
+    → user1 được add vào 2 session khác nhau
+    → Broadcast sẽ gửi 2 lần cho user1
+
+Với mutex:
+    Thread 1 lock → login user1 → unlock
+    Thread 2 lock (chờ) ... unlock Thread 1 ...
+    Thread 2 lock → read online=1 → FAIL (ALREADY_ONLINE)
+
+
+=== 9. Lưu Trữ Bền Vững ===
+
+users.txt:
+    - Lưu username, password, role, display_name
+    - Cập nhật sau: register, login (không cập nhật file), logout (không cập nhật file)
+    - Thực tế: online flag không được lưu vào file (chỉ lưu trong mảy)
+    - Sau restart: tất cả user = offline (online=0)
+
+users[]:
+    - online flag chỉ tồn tại trong memory
+    - Mất khi restart server
+    - Giải pháp: có thể ghi online flag vào users.txt (phức tạp hơn)
+
+
+=== 10. Vấn Đề & Cải Tiến ===
+
+Hiện tại:
+- Password plain text (không mã hoá) → nguy hiểm
+- Không có token/session key → relay trên username
+- Không có timeout tự động → chỉ 5 phút timeout socket
+
+Cải tiến:
+1. Hash password: bcrypt/SHA256
+2. Session token: tạo token random, lưu vào sessions[], client gửi token thay username
+3. Keep-alive: gửi ping định kỳ để phát hiện disconnect
+4. Login attempt limit: chặn login sai quá N lần (brute force)
+

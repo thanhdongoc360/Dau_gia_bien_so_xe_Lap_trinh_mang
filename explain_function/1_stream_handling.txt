@@ -1,0 +1,70 @@
+1. Server xử lý thế nào (Threads & Luồng)
+
+Mỗi client = 1 thread:
+Khi client kết nối, accept() tạo một thread handle_client(). Thread này chịu trách nhiệm nhận lệnh và gửi phản hồi riêng cho client đó.
+
+Chia sẻ dữ liệu toàn cục:
+Mảng users, rooms, sessions chứa thông tin người dùng, phòng, phiên đăng nhập.
+
+Mutex bảo vệ dữ liệu chung → tránh 2 thread thay đổi cùng lúc gây lỗi.
+
+Vòng nhận lệnh:
+Thread dùng recv() đọc dữ liệu, phân tích lệnh (REGISTER, LOGIN, BID…), rồi dùng send() trả về kết quả.
+
+2. Client xử lý thế nào
+
+Thread nhận dữ liệu:
+recv_loop() chạy riêng, đọc dữ liệu server liên tục, in ra màn hình.
+
+Mutex print_mutex bảo đảm không in lẫn nhau nếu có nhiều thread in.
+
+Thread gửi lệnh:
+Luồng chính đọc input từ bàn phím, gửi lệnh bằng send().
+
+Trạng thái local như logged_in, current_room giúp hiển thị menu đúng.
+
+3. Phân tích lệnh & Timeout
+
+Server so khớp chữ cái với strncmp()/sscanf() để biết lệnh gì.
+
+Timeout:
+
+SO_RCVTIMEO = 300s → client không gửi gì quá 5 phút → server tự ngắt kết nối.
+
+Kết thúc: phát USER_LEAVE, xoá session, close() socket.
+
+4. Broadcast & Phiên (Session)
+
+Server giữ session map: socket → username → phòng hiện tại.
+
+Khi có sự kiện (JOIN/LEAVE/BID/SOLD…) → server lặp qua các session active, gửi thông báo cho những ai trong cùng phòng.
+
+5. Timer đấu giá
+
+Thread auction_manager() chạy vòng sleep(1). Mỗi giây:
+
+Kiểm tra thời gian còn lại của item.
+
+Gửi WARNING_30S khi còn 30 giây.
+
+Khi hết giờ → set SOLD, ghi file, broadcast.
+
+Nếu có bid gần hết giờ (≤5s) → cộng thêm 5s, gửi TIME_EXTENDED và NEW_BID.
+
+6. Stream & Framing
+
+Hiện tại: mỗi lệnh là một chuỗi ASCII → recv() nhận trọn lệnh.
+
+Hạn chế: Nếu server bận hoặc client gửi nhiều lệnh cùng lúc, buffer có thể bị dính nhiều lệnh hoặc nhận chưa đủ.
+
+Cải tiến:
+
+Newline-delimited: mỗi lệnh kết thúc bằng \n.
+
+Length-prefixed: gửi length + payload, server đọc đúng số byte cần thiết.
+
+7. An toàn & Persistence
+
+Mutex: tất cả thay đổi rooms/items/users đều bọc mutex.
+
+Ghi file ngay: server lưu trạng thái ra file sau mọi thay đổi quan trọng → restart vẫn giữ dữ liệu.

@@ -1,0 +1,179 @@
+Mình có thể giải thích lại **feature mới PROMOTE_TO_ADMIN** theo cách dễ hiểu và trực quan, tóm tắt từ nội dung bạn đã làm:
+
+---
+
+## **1. Mục đích Feature**
+
+* Cho phép **admin nâng cấp user thường** thành **admin**.
+* User mới được nâng cấp sẽ có quyền tạo phòng, thêm item, quản lý đấu giá.
+
+---
+
+## **2. Tổng Quan Quy Trình**
+
+```
+Client Admin ──> Server(handle_client) ──> PROMOTE_TO_ADMIN handler ──> users.c: promote_user_to_admin()
+Server ──> Phản hồi PROMOTE_OK / ALREADY_ADMIN / FAIL ──> Client Admin
+```
+
+1. Admin login.
+2. Gửi lệnh:
+
+   ```
+   PROMOTE_TO_ADMIN username
+   ```
+3. Server kiểm tra:
+
+   * Người gửi là admin không?
+   * Username có tồn tại không?
+   * User đã là admin chưa?
+4. Nếu hợp lệ → gọi `promote_user_to_admin()` → cập nhật role, ghi file, log.
+5. Gửi phản hồi về client.
+
+---
+
+## **3. Chi Tiết Từng Bước**
+
+### **Bước 1: Client gửi lệnh**
+
+```
+LOGIN admin admin123
+PROMOTE_TO_ADMIN user1
+```
+
+### **Bước 2: Server nhận & xử lý** (handler.c)
+
+* Kiểm tra quyền của client (role="admin").
+* Gọi `promote_user_to_admin(username)` trong users.c.
+* Gửi phản hồi:
+
+  * `PROMOTE_OK` → thành công
+  * `ALREADY_ADMIN` → user đã là admin
+  * `PROMOTE_FAIL` → lỗi khác (user không tồn tại, mutex lỗi…)
+
+---
+
+### **Bước 3: Xử lý logic trong users.c**
+
+```c
+int promote_user_to_admin(char *username) {
+    pthread_mutex_lock(&users_mutex);
+    
+    // Tìm user trong users[]
+    for (int i = 0; i < user_count; i++) {
+        if (strcmp(users[i].username, username) == 0) {
+            if (strcmp(users[i].role, "admin") == 0) {
+                pthread_mutex_unlock(&users_mutex);
+                return 2; // Already admin
+            }
+            strcpy(users[i].role, "admin"); // Nâng cấp
+            save_users();                   // Lưu file
+            log_event("PROMOTE user=%s to admin", username);
+            pthread_mutex_unlock(&users_mutex);
+            return 1; // Success
+        }
+    }
+    
+    pthread_mutex_unlock(&users_mutex);
+    return 0; // User không tồn tại
+}
+```
+
+**Giải thích:**
+
+* **Mutex** đảm bảo an toàn khi nhiều thread thao tác trên `users[]`.
+* Kiểm tra user tồn tại và chưa là admin.
+* Cập nhật role, lưu file, ghi log.
+* Trả về trạng thái: success / already admin / fail.
+
+---
+
+### **Bước 4: Ghi file & log**
+
+* **save_users()**: ghi toàn bộ users vào `users.txt` theo format:
+
+  ```
+  username password role display_name
+  ```
+* **log_event()**: ghi vào `server.log` với timestamp, ví dụ:
+
+  ```
+  [2025-12-22 11:00:15] PROMOTE user=user1 to admin
+  ```
+
+---
+
+### **Bước 5: Phản hồi Client**
+
+* Nếu thành công:
+
+  ```
+  Server: PROMOTE_OK
+  ```
+* Nếu user đã admin:
+
+  ```
+  Server: ALREADY_ADMIN
+  ```
+* Nếu lỗi khác:
+
+  ```
+  Server: PROMOTE_FAIL
+  ```
+
+> Sau lần login tiếp theo, user đã được nâng cấp → role=admin → có toàn quyền admin.
+
+---
+
+## **4. An Toàn Luồng**
+
+* **users_mutex** bảo vệ:
+
+  * Truy cập/mảng users[]
+  * Lưu file `users.txt`
+  * Ghi log
+* Tránh race condition khi nhiều admin cùng thao tác nâng cấp.
+
+---
+
+## **5. Ví Dụ Thực Tế**
+
+**Trước nâng cấp:**
+
+```
+users.txt:
+user1 123456 user user1
+admin admin123 admin admin
+```
+
+**Admin nâng cấp user1:**
+
+```
+PROMOTE_TO_ADMIN user1
+Server: PROMOTE_OK
+```
+
+**Sau nâng cấp:**
+
+```
+users.txt:
+user1 123456 admin user1
+admin admin123 admin admin
+```
+
+* user1 giờ có quyền admin.
+
+---
+
+## **6. Cải Tiến / Lưu Ý**
+
+1. Có thể **gửi thông báo broadcast** khi user được nâng cấp.
+2. Hash password thay vì lưu plain text.
+3. Kiểm tra input username hợp lệ trước khi nâng cấp.
+4. Nếu muốn undo, thêm feature **DEMOTE_TO_USER**.
+
+---
+
+Nếu muốn, mình có thể vẽ **sơ đồ luồng dữ liệu PROMOTE_TO_ADMIN** trực quan, từ client → server → mutex → users[] → file → log → phản hồi client, giống như sơ đồ REGISTER trước đó, để dễ hình dung.
+
+Bạn có muốn mình vẽ sơ đồ không?

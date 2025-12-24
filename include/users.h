@@ -9,5 +9,6 @@ void logout_user(char *username);
 
 int  change_password(const char *username, const char *oldp, const char *newp);
 int  change_display_name(const char *username, const char *newname);
+int  promote_user_to_admin(const char *username, const char *admin);
 
 #endif

@@ -133,3 +133,35 @@ int change_display_name(const char *username, const char *newname) {
     pthread_mutex_unlock(&users_mutex);
     return 0;
 }
+
+int promote_user_to_admin(const char *username, const char *admin) {
+    pthread_mutex_lock(&users_mutex);
+    
+    // Find user to promote
+    int target_idx = -1;
+    for (int i = 0; i < user_count; i++) {
+        if (strcmp(users[i].username, username) == 0) {
+            target_idx = i;
+            break;
+        }
+    }
+    
+    if (target_idx == -1) {
+        pthread_mutex_unlock(&users_mutex);
+        return 0;  // User not found
+    }
+    
+    // Check if already admin
+    if (strcmp(users[target_idx].role, "admin") == 0) {
+        pthread_mutex_unlock(&users_mutex);
+        return -1;  // Already admin
+    }
+    
+    // Promote
+    strcpy(users[target_idx].role, "admin");
+    save_users();
+    pthread_mutex_unlock(&users_mutex);
+    
+    log_event("PROMOTE_TO_ADMIN user=%s promoted_by=%s", username, admin);
+    return 1;  // Success
+}

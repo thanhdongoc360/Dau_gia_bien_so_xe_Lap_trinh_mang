@@ -1,0 +1,50 @@
+Tóm gọn Phân Quyền Phòng Đấu Giá:
+
+---
+
+### 1️⃣ Hai cấp quyền chính
+
+1. **Role-based (dựa trên vai trò)**
+
+   * **Admin:** tạo phòng, mở/đóng phòng, thêm/xóa item, nâng cấp user, dùng tất cả chức năng user.
+   * **User:** join/leave phòng, xem danh sách, bid, buy_now. Không tạo phòng hay quản lý item.
+
+2. **Ownership-based (dựa trên quyền sở hữu phòng)**
+
+   * **Admin của phòng (owner):** chỉ quản lý phòng mình tạo (mở/đóng, thêm/xóa item).
+   * **Member:** chỉ tham gia đấu giá và xem item trong phòng mình đang ở.
+
+---
+
+### 2️⃣ Quyền cụ thể & kiểm tra
+
+| Hành động       | Ai làm được   | Kiểm tra                                                    |
+| --------------- | ------------- | ----------------------------------------------------------- |
+| CREATE_ROOM     | Admin         | Login, role="admin"                                         |
+| OPEN/CLOSE_ROOM | Admin (owner) | Login, role="admin", owner = admin gọi lệnh                 |
+| ADD/REMOVE_ITEM | Admin (owner) | Login, role="admin", owner = admin gọi lệnh, phòng chưa đầy |
+| JOIN_ROOM       | User          | Login, phòng open, chưa ở phòng khác, chưa ở phòng này      |
+| BID/BUY_NOW     | Member phòng  | Login, đang ở phòng, item ACTIVE, giá hợp lệ (BID)          |
+
+---
+
+### 3️⃣ Quy tắc chung
+
+* **1 user chỉ ở 1 phòng tại 1 thời điểm**
+* **Chỉ admin mới tạo/phụ trách phòng**
+* **Chỉ owner mới quản lý item/phòng**
+* **Chỉ member mới bid/mua item**
+* **Phòng phải mở để join**, item phải ACTIVE để bid
+
+---
+
+### 4️⃣ Ví dụ
+
+* Admin1 tạo room1 → owner = admin1
+* Admin2 không thể mở/đóng hay thêm item room1
+* User1 join room1 → chỉ bid/buy item trong room1
+* User1 muốn tham gia room2 phải leave room1 trước
+
+---
+
+Nếu muốn, tôi có thể vẽ **1 sơ đồ trực quan** luồng quyền hạn từ CREATE_ROOM → BID/BUY_NOW, nhìn là hiểu ngay. Bạn có muốn tôi vẽ không?

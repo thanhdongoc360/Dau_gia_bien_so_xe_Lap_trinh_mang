@@ -1,0 +1,371 @@
+Xem Danh Sách Phòng (LIST_ROOMS) - Chi Tiết Chi Tiết
+
+=== 1. Tổng Quan Chức Năng ===
+
+Mục đích: User (admin hoặc thường) xem danh sách tất cả phòng đấu giá trong hệ thống
+
+Thông tin cung cấp:
+- ID phòng
+- Tên phòng
+- Trạng thái (OPEN / CLOSED)
+- Không hiển thị: admin, members, items (chỉ trong LIST_ITEMS)
+
+Quy trình:
+
+                        Client (admin/user)
+                              │
+                     "LIST_ROOMS" (gửi lệnh)
+                              │
+                              ▼
+                    ┌──────────────────────┐
+                    │ Handler kiểm tra:    │
+                    │ - Login?             │
+                    │ (không cần admin)    │
+                    └──────────┬───────────┘
+                               │
+                               ▼
+                    ┌──────────────────────┐
+                    │ list_rooms()         │
+                    │ - Duyệt rooms[]      │
+                    │ - Format dữ liệu     │
+                    │ - Dừng msg           │
+                    └──────────┬───────────┘
+                               │
+                               ▼
+                    send(ROOM_LIST + danh sách)
+                               │
+                               ▼
+                    Client nhận & in ra
+
+
+Dưới đây là **bản giải thích LIST_ROOMS được hệ thống hoá lại – gọn, chuẩn backend, dễ nhớ**, bám **100% đúng code & mô tả bạn đưa**, không lan man.
+
+---
+
+# LIST_ROOMS – Xem Danh Sách Phòng Đấu Giá (Giải thích chuẩn)
+
+---
+
+## 1. LIST_ROOMS dùng để làm gì?
+
+* Cho **mọi user đã login** (admin hoặc thường) xem:
+
+  * ID phòng
+  * Tên phòng
+  * Trạng thái: **OPEN / CLOSED**
+* **Không lộ thông tin nhạy cảm**:
+
+  * Không admin
+  * Không members
+  * Không items
+
+👉 Đây là **API read-only, public (sau login)**
+
+---
+
+## 2. Điều kiện để dùng LIST_ROOMS
+
+Chỉ có **1 điều kiện duy nhất**:
+
+* ✅ Đã login
+
+❌ Không cần:
+
+* Admin
+* Join phòng
+* Tham số bổ sung
+
+---
+
+## 3. Handler xử lý LIST_ROOMS (logic cốt lõi)
+
+```c
+else if (strncmp(buffer, "LIST_ROOMS", 10) == 0) {
+    if (strlen(username) == 0)
+        send(client_sock, "NEED_LOGIN\n", 11, 0);
+    else
+        list_rooms(client_sock);
+}
+```
+
+### Thứ tự xử lý:
+
+1. **So khớp lệnh**
+
+   * `strncmp(..., 10)`
+   * Lệnh không có tham số → đơn giản
+
+2. **Kiểm tra login**
+
+   * `username == ""` → `NEED_LOGIN`
+
+3. **Gọi list_rooms()**
+
+   * Không check role
+   * Truyền socket để gửi dữ liệu
+
+👉 Handler **không build dữ liệu**, chỉ điều phối
+
+---
+
+## 4. list_rooms() – bản chất thực sự làm gì?
+
+### Tóm tắt 1 câu:
+
+> Duyệt `rooms[]` → format từng phòng thành text → ghép lại → gửi 1 lần qua socket
+
+---
+
+### 4.1 Khởi tạo message
+
+```c
+char msg[1024] = "ROOM_LIST\n";
+```
+
+* 1024 byte: buffer chứa toàn bộ danh sách
+* `"ROOM_LIST\n"` là **header protocol**
+* Client nhìn header là biết đây là danh sách phòng
+
+---
+
+### 4.2 Duyệt từng phòng
+
+```c
+for (int i = 0; i < room_count; i++)
+```
+
+* `room_count` = số phòng hiện có
+* Chỉ đọc dữ liệu, **không sửa**
+
+---
+
+### 4.3 Format từng dòng
+
+```c
+sprintf(line, "%d. %s [%s]\n",
+        rooms[i].id,
+        rooms[i].name,
+        rooms[i].active ? "OPEN" : "CLOSED");
+```
+
+Kết quả mỗi dòng có dạng:
+
+```
+<ID>. <Tên> [OPEN|CLOSED]
+```
+
+Ví dụ:
+
+```
+2. room2 [CLOSED]
+```
+
+👉 Dùng `active` làm **single source of truth**
+
+---
+
+### 4.4 Ghép chuỗi
+
+```c
+strcat(msg, line);
+```
+
+* Ghép từng dòng vào `msg`
+* Sau vòng lặp → `msg` chứa toàn bộ danh sách
+
+---
+
+### 4.5 Gửi 1 lần
+
+```c
+send(sock, msg, strlen(msg), 0);
+```
+
+👉 **1 request → 1 response**, không stream
+
+---
+
+## 5. Định dạng phản hồi (Protocol)
+
+### Raw data gửi client:
+
+```
+ROOM_LIST
+1. room1 [OPEN]
+2. room2 [CLOSED]
+3. room3 [OPEN]
+```
+
+### Ý nghĩa:
+
+* Dòng 1: Header
+* Các dòng sau: mỗi phòng = 1 dòng
+
+👉 Client chỉ cần:
+
+* Split theo `\n`
+* Bỏ dòng đầu
+* In các dòng còn lại
+
+---
+
+## 6. Ý nghĩa trạng thái OPEN / CLOSED
+
+### OPEN (`active = 1`)
+
+* JOIN_ROOM được
+* ADD_ITEM được
+* BID / BUY_NOW được
+
+### CLOSED (`active = 0`)
+
+* ❌ JOIN_ROOM
+* ❌ ADD_ITEM
+* Chỉ xem được
+
+👉 LIST_ROOMS giúp user **quyết định có join hay không**
+
+---
+
+## 7. Vấn đề kỹ thuật quan trọng (rất đáng ghi điểm)
+
+### 7.1 Race condition (điểm trừ tiềm ẩn)
+
+* list_rooms() **không lock mutex**
+* Nếu admin:
+
+  * CREATE_ROOM
+  * DELETE_ROOM
+  * CLOSE_ROOM
+* Đúng lúc đang duyệt → lỗi
+
+✅ Giải pháp chuẩn:
+
+```c
+pthread_mutex_lock(&rooms_mutex);
+list_rooms(sock);
+pthread_mutex_unlock(&rooms_mutex);
+```
+
+---
+
+### 7.2 Buffer overflow (nguy hiểm)
+
+* 50 phòng × ~50 byte ≈ 2500 byte
+* `msg[1024]` **không đủ**
+
+✅ Giải pháp:
+
+* Tăng buffer (4096)
+* Hoặc phân trang (advanced)
+
+---
+
+## 8. Trường hợp đặc biệt
+
+### Không có phòng
+
+```
+ROOM_LIST
+```
+
+* Hợp lệ
+* Client phải xử lý danh sách trống
+
+---
+
+## 9. So sánh nhanh (rất dễ hỏi trong vấn đáp)
+
+| Tiêu chí   | LIST_ROOMS    | LIST_ITEMS |
+| ---------- | ------------- | ---------- |
+| Login      | ✅             | ✅          |
+| Admin      | ❌             | ❌          |
+| Join phòng | ❌             | ✅          |
+| Phạm vi    | Toàn hệ thống | 1 phòng    |
+| Dữ liệu    | Phòng         | Item       |
+
+---
+
+## 10. Bản chất thiết kế (câu kết luận mạnh)
+
+> **LIST_ROOMS là API read-only, public-after-login, dùng cho discovery**,
+> giúp user **khám phá hệ thống trước khi tương tác sâu**.
+
+Nếu bạn muốn, mình có thể:
+
+* Chuẩn hoá phần này thành **tài liệu báo cáo nộp thầy**
+* Viết **pseudo-code phiên bản an toàn (mutex + pagination)**
+* So sánh LIST_ROOMS này với **API REST thực tế (GET /rooms)**
+
+Chỉ cần nói tiếp 👍
+
+
+=== 11. Flow Diagram ===
+
+┌──────────────────────────────────────┐
+│ LIST_ROOMS (user gửi)                │
+└──────────┬──────────────────────────┘
+           │
+     ┌─────▼────────────┐
+     │ PARSE lệnh       │
+     │ (không có param) │
+     └─────┬────────────┘
+           │
+     ┌─────▼────────────┐
+     │ Kiểm tra login?  │
+     │ ✓ username set   │
+     └─────┬────────────┘
+           │
+     ┌─────▼──────────────────┐
+     │ list_rooms()           │
+     │ ├─ msg="ROOM_LIST\n"   │
+     │ ├─ for i in 0..count:  │
+     │ │  ├─ format line      │
+     │ │  └─ append to msg    │
+     │ └─ send(sock, msg)     │
+     └─────┬──────────────────┘
+           │
+     ┌─────▼──────────────┐
+     │ Client nhận        │
+     │ Parse từng dòng    │
+     │ In ra:             │
+     │ ROOM_LIST          │
+     │ 1. room1 [OPEN]    │
+     │ 2. room2 [CLOSED]  │
+     │ 3. room3 [OPEN]    │
+     └────────────────────┘
+
+
+=== 12. So Sánh LIST_ROOMS vs LIST_ITEMS ===
+
+LIST_ROOMS:
+───────────
+- Xem tất cả phòng trong hệ thống
+- Chỉ cần login (không cần join phòng)
+- Hiển thị: ID, Tên, Trạng thái
+- Không hiển thị: Admin, Members, Items
+
+LIST_ITEMS:
+───────────
+- Xem item trong phòng mà user đang ở
+- Cần login + JOIN_ROOM trước
+- Hiển thị: Item ID, Biển số, Giá, Bước giá, Buy-now, Leader, Status, Thời gian còn
+- Chỉ item trong phòng hiện tại
+
+
+=== 13. Cải Tiến Có Thể Làm ===
+
+1. Thêm số lượng members hiển thị:
+   "1. room1 [OPEN] - 2 members"
+
+2. Thêm số lượng items:
+   "1. room1 [OPEN] - 3 items"
+
+3. Phân trang: Nếu quá nhiều phòng, gửi từng batch
+
+4. Filter: LIST_ROOMS OPEN (chỉ xem OPEN) hoặc LIST_ROOMS CLOSED
+
+5. Sort: LIST_ROOMS SORT_BY_ID hoặc SORT_BY_NAME
+
+6. Hiển thị admin: LIST_ROOMS ADMIN (xem ai quản lý)
+

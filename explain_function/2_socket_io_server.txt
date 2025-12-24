@@ -1,0 +1,82 @@
+1. Khởi tạo socket & lắng nghe kết nối (main.c)
+
+Server tạo socket TCP:
+
+socket(AF_INET, SOCK_STREAM, 0)
+
+
+Bind địa chỉ IP + PORT → server biết nghe ở đâu.
+
+Listen → bắt đầu chờ client kết nối.
+
+Nghĩa là server “mở cửa” và sẵn sàng đón khách.
+
+2. Vòng accept (main.c)
+
+Server dùng accept() → chờ client kết nối.
+
+Khi có client → tạo thread mới handle_client() xử lý riêng cho client đó.
+
+Mỗi thread có socket riêng, không ảnh hưởng các client khác.
+
+3. Nhận dữ liệu & timeout (handler.c)
+
+Dùng recv() đọc dữ liệu từ socket.
+
+Timeout: SO_RCVTIMEO = 300s → nếu client không gửi gì quá 5 phút, thread sẽ tự thoát.
+
+recv() trả:
+
+n > 0 → có dữ liệu
+
+n = 0 → client đóng kết nối
+
+n < 0 → lỗi hoặc timeout
+
+Giúp server không bị treo vì client “im lặng”.
+
+4. Phân tích lệnh & gửi phản hồi
+
+Server dùng strncmp()/sscanf() để đọc lệnh: REGISTER, LOGIN, BID…
+
+Gọi hàm xử lý tương ứng.
+
+Trả kết quả về client bằng send().
+
+5. Broadcast trong phòng (session.c)
+
+Khi có sự kiện (JOIN, LEAVE, BID, SOLD…) → server duyệt tất cả session đang active.
+
+Gửi thông báo tới những client cùng phòng.
+
+Như “thông báo chung cho mọi người trong phòng đấu giá”.
+
+6. Session map (session.c)
+
+update_session_login() → lưu socket → username → role.
+
+remove_session() → xóa khi client rời hoặc logout.
+
+Giúp server biết ai đang online, đang ở phòng nào.
+
+7. Đóng kết nối & dọn dẹp (handler.c)
+
+Khi client rời:
+
+Gửi USER_LEAVE cho các user khác.
+
+Xóa session, logout.
+
+close() socket → giải phóng tài nguyên.
+
+Thread kết thúc (exit thread).
+
+8. Vấn đề & cải tiến
+
+Hiện tại recv() không bảo đảm nhận trọn lệnh, có thể nhận dính nhiều lệnh hoặc thiếu:
+
+Cải tiến: dùng newline (\n) hoặc length-prefix framing để tách lệnh.
+
+Khi nhiều client → server hiện tại dùng 1 thread/client.
+
+Có thể cải tiến: select/epoll để quản lý nhiều socket trong 1 thread, tiết kiệm tài nguyên.

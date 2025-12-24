@@ -1,0 +1,303 @@
+Cập Nhật Thông Tin Cá Nhân - Chi Tiết Đầy Đủ
+
+=== 1. Tổng Quan Chức Năng ===
+
+Mục đích: User cập nhật thông tin cá nhân sau khi đăng ký
+
+Hệ thống hỗ trợ 2 chức năng:
+1. CHANGE_PASS - Đổi mật khẩu
+2. CHANGE_NAME - Đổi tên hiển thị (display_name)
+
+Dữ liệu User trong users.txt:
+─────────────────────────────
+username password role display_name online
+
+Ví dụ:
+user1 123456 user USER01 0
+admin 123456 admin admin 0
+
+Quy trình chung:
+
+                        Client (user)
+                              │
+                    "CHANGE_PASS/CHANGE_NAME ..."
+                              │
+                              ▼
+                    ┌──────────────────────┐
+                    │ Handler kiểm tra:    │
+                    │ - Login?             │
+                    │ - Parse parameters?  │
+                    └──────────┬───────────┘
+                               │
+                               ▼
+                    ┌──────────────────────┐
+                    │ change_password() /  │
+                    │ change_display_name()│
+                    │ - Lock mutex         │
+                    │ - Tìm user           │
+                    │ - Validate           │
+                    │ - Cập nhật           │
+                    │ - save_users()       │
+                    │ - Unlock mutex       │
+                    └──────────┬───────────┘
+                               │
+                               ▼
+                    send(OK / FAIL)
+
+Dưới đây là **bản giải thích đã được “chuẩn hoá – rút gọn – có thể dùng trực tiếp cho báo cáo / vấn đáp”** cho **Cập Nhật Thông Tin Cá Nhân**, dựa **100% đúng nội dung bạn đưa**, không thêm giả định, không sửa logic.
+
+Mình **không chép lại code**, mà tập trung **giải thích bản chất hệ thống + luồng + ý nghĩa thiết kế**.
+
+---
+
+# CẬP NHẬT THÔNG TIN CÁ NHÂN (USER PROFILE UPDATE)
+
+---
+
+## 1. Tổng quan chức năng
+
+### Mục đích
+
+* Cho phép **user đã đăng nhập** cập nhật thông tin cá nhân **sau khi đăng ký**
+* Không ảnh hưởng tới user khác
+* Dữ liệu được **lưu bền vững** (persist qua restart server)
+
+---
+
+### Hai chức năng được hỗ trợ
+
+1. **CHANGE_PASS** – Đổi mật khẩu
+2. **CHANGE_NAME** – Đổi tên hiển thị (display_name)
+
+---
+
+### Dữ liệu user trong hệ thống
+
+```
+username password role display_name online
+```
+
+* `username`: định danh duy nhất, **không đổi**
+* `password`: có thể đổi
+* `display_name`: có thể đổi
+* `role`: admin / user
+* `online`: trạng thái đăng nhập
+
+---
+
+## 2. Luồng xử lý chung (chuẩn backend)
+
+```
+Client → Handler
+       → Kiểm tra login
+       → Parse tham số
+       → Gọi hàm xử lý users
+       → Lock mutex
+       → Validate & update
+       → save_users()
+       → Unlock mutex
+       → Ghi log
+       → Trả kết quả
+```
+
+👉 Đây là **CRUD chuẩn server-side**, không phải xử lý tạm
+
+---
+
+## 3. CHANGE_PASS – Đổi mật khẩu
+
+### 3.1 Điều kiện bắt buộc
+
+* User **phải login**
+* Phải cung cấp **old password đúng**
+* Format lệnh hợp lệ
+
+---
+
+### 3.2 Ý nghĩa từng bước xử lý
+
+1. **Kiểm tra login**
+
+   * Ngăn user chưa xác thực đổi mật khẩu
+
+2. **Parse old password & new password**
+
+   * Giới hạn độ dài → chống buffer overflow
+   * Thiếu tham số → BAD_FORMAT
+
+3. **Lock `users_mutex`**
+
+   * Ngăn race condition khi nhiều thread sửa users[]
+
+4. **Xác thực old password**
+
+   * Đảm bảo chỉ **chủ tài khoản** mới đổi được mật khẩu
+   * Đây là điểm **security quan trọng nhất**
+
+5. **Cập nhật password trong memory**
+
+   * Ghi đè trực tiếp vào `users[i].password`
+
+6. **save_users()**
+
+   * Ghi toàn bộ users[] ra file `users.txt`
+   * Đảm bảo **persistence**
+
+7. **Ghi log**
+
+   * Phục vụ audit & debug
+
+---
+
+### 3.3 Bản chất bảo mật của CHANGE_PASS
+
+* Không cho đổi mật khẩu nếu **không biết mật khẩu cũ**
+* Không cần admin
+* Không ảnh hưởng session hiện tại
+
+👉 Đây là **self-service security action**
+
+---
+
+## 4. CHANGE_NAME – Đổi tên hiển thị
+
+### 4.1 Điều kiện
+
+* Chỉ cần **đã login**
+* Không cần password cũ
+
+---
+
+### 4.2 Ý nghĩa thiết kế
+
+1. **Tên hiển thị không phải định danh**
+
+   * Cho phép đổi linh hoạt
+   * Không ảnh hưởng quyền hạn hay dữ liệu
+
+2. **Không cần validate phức tạp**
+
+   * Không kiểm tra trùng
+   * Không cần xác thực mạnh như password
+
+3. **Lock mutex + save_users()**
+
+   * Đảm bảo nhất quán dữ liệu
+   * Không ghi file chồng chéo
+
+4. **Ghi log**
+
+   * Có thể audit thay đổi profile
+
+---
+
+### 4.3 Bản chất của CHANGE_NAME
+
+* Chỉ là **UI / presentation-level data**
+* Không ảnh hưởng bảo mật
+* Không ảnh hưởng hệ thống đấu giá
+
+---
+
+## 5. So sánh nhanh CHANGE_PASS vs CHANGE_NAME
+
+| Tiêu chí       | CHANGE_PASS  | CHANGE_NAME  |
+| -------------- | ------------ | ------------ |
+| Mức độ bảo mật | Cao          | Thấp         |
+| Validate       | Old password | Không        |
+| Ảnh hưởng      | Security     | UI           |
+| Ai làm được    | Chính user   | Chính user   |
+| Field đổi      | password     | display_name |
+| Persistence    | Có           | Có           |
+| Log            | Có           | Có           |
+
+---
+
+## 6. Mutex & An toàn dữ liệu
+
+### Vì sao bắt buộc lock mutex?
+
+* users[] là **shared resource**
+* save_users() ghi toàn bộ file
+* Nếu không lock → **mất dữ liệu / ghi đè**
+
+👉 Đây là **điểm thiết kế backend đúng chuẩn**
+
+---
+
+## 7. Persistence – vì sao save_users() rất quan trọng?
+
+* Mọi thay đổi:
+
+  * password
+  * display_name
+* Đều được ghi ngay vào file
+
+➡ Server restart **không mất dữ liệu**
+
+---
+
+## 8. Các lỗi được xử lý rõ ràng
+
+### CHANGE_PASS
+
+* NEED_LOGIN
+* BAD_FORMAT
+* CHANGE_PASS_FAIL (old password sai)
+
+### CHANGE_NAME
+
+* NEED_LOGIN
+* BAD_FORMAT
+* CHANGE_NAME_FAIL (hiếm, lý thuyết)
+
+👉 Protocol rõ ràng, client dễ xử lý
+
+---
+
+## 9. Ý nghĩa tích hợp hệ thống
+
+Sau khi cập nhật:
+
+* Password mới có hiệu lực ngay
+* Display name mới hiển thị trong:
+
+  * Broadcast
+  * HISTORY
+  * Thông báo đấu giá
+* Session **không bị reset**
+
+---
+
+## 10. Nhận xét thiết kế (rất quan trọng khi vấn đáp)
+
+### Điểm tốt
+
+* Luồng rõ ràng
+* Có mutex
+* Có persistence
+* Có log
+* Phân biệt rõ security-level vs UI-level update
+
+### Hạn chế (đúng mức đồ án)
+
+* Password plain text
+* Không rate limit
+* Không hash
+
+👉 Với **đồ án C / socket / multi-thread**:
+**Thiết kế này là hợp lý và có tư duy hệ thống**
+
+---
+
+## 11. Kết luận 1 câu (đinh)
+
+> **CHANGE_PASS và CHANGE_NAME là hai chức năng self-service chuẩn backend**,
+> được thiết kế đúng nguyên tắc:
+> **authentication → validation → concurrency control → persistence → audit**
+
+Nếu bạn muốn, mình có thể:
+
+* Viết **phiên bản “trả lời miệng 2 phút cho thầy”**
+* Rút gọn thành **2 slide trình bày**
+* Hoặc **so sánh với hệ thống user profile thực tế (web / REST)**

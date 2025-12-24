@@ -1,0 +1,172 @@
+Chức Năng Đăng Ký Tài Khoản (REGISTER) - Chi Tiết
+
+=== 1. Quy Trình Tổng Thể ===
+
+Client gửi lệnh REGISTER → Server phân tích → Kiểm tra trùng username → Lưu vào mảng users + file → Phản hồi REGISTER_OK/FAIL
+
+                                    Client
+                                      │
+                        ┌─────────────┴─────────────┐
+                        │ send("REGISTER user1 pass1")
+                        │
+                        ▼
+                      Server (handle_client)
+                        │
+                   ┌────┴────────────────────────────┐
+                   │ 1. Nhận lệnh bằng recv()        │
+                   │ 2. Phân tích = "REGISTER user1 pass1"
+                   │ 3. Gọi register_user()          │
+                   │ 4. Trả về REGISTER_OK/FAIL      │
+                   └────┬─────────────────────────────┘
+                        │
+                        ▼
+                      [register_user() trong users.c]
+                        │
+                   ┌────┴──────────────────────────────────┐
+                   │ 1. Lock mutex (an toàn luồng)         │
+                   │ 2. Kiểm tra username có trùng?        │
+                   │ 3. Kiểm tra user_count < MAX_USERS?   │
+                   │ 4. Thêm vào mảng users[]              │
+                   │ 5. Lưu vào file users.txt             │
+                   │ 6. Ghi log "REGISTER user=user1"      │
+                   │ 7. Unlock mutex, return 1 (success)   │
+                   └────┬──────────────────────────────────┘
+                        │
+                        ▼
+                      [save_users() trong users.c]
+                        │
+                   ┌────┴─────────────────────────┐
+                   │ Ghi tất cả users vào users.txt
+                   │ Format: username password role display_name
+                   └────┬──────────────────────────┘
+                        │
+                        ▼
+                      send("REGISTER_OK\n") tới client
+
+
+1. Tổng Quan Quy Trình
+
+Client gửi lệnh REGISTER kèm username và password.
+
+Server nhận lệnh, phân tích.
+
+Server kiểm tra:
+
+Username đã tồn tại chưa?
+
+Số lượng user còn cho phép không?
+
+Nếu hợp lệ: thêm user vào mảng users, ghi vào users.txt, ghi log.
+
+Gửi phản hồi về client: REGISTER_OK hoặc REGISTER_FAIL.
+
+Luồng dữ liệu:
+
+Client ──"REGISTER user1 pass1"──> Server(handle_client) ──> register_user()
+                                                         └─> save_users()
+                                                         └─> log_event()
+Server ──"REGISTER_OK/FAIL"──> Client
+
+2. Chi Tiết Từng Bước
+Bước 1: Client gửi lệnh
+
+Client chuẩn bị chuỗi: "REGISTER user1 123456"
+
+Gửi lên server qua send().
+
+Bước 2: Server nhận & phân tích
+
+handle_client() nhận dữ liệu bằng recv().
+
+Kiểm tra tiền tố "REGISTER" → đúng → trích username và password.
+
+Gọi hàm register_user(username, password).
+
+Gửi phản hồi OK/FAIL về client bằng send().
+
+Bước 3: Xử lý logic trong register_user()
+
+Lock mutex → tránh 2 thread cùng thao tác trên users[].
+
+Kiểm tra trùng username: nếu đã tồn tại → FAIL.
+
+Kiểm tra số lượng user: nếu >= MAX_USERS → FAIL.
+
+Thêm user mới: cập nhật mảng users[], role="user", display_name=username.
+
+Lưu vào file (save_users()) và ghi log (log_event()).
+
+Unlock mutex và trả về success (1) hoặc fail (0).
+
+Mutex đảm bảo an toàn khi nhiều client cùng đăng ký cùng lúc, tránh mất dữ liệu hoặc trùng lặp.
+
+Bước 4: Lưu users vào file
+
+save_users() mở file users.txt chế độ ghi toàn bộ (write).
+
+Duyệt mảng users[], ghi mỗi user theo format:
+
+username password role display_name
+
+
+Đóng file (fclose) → dữ liệu được ghi vĩnh viễn.
+
+Bước 5: Ghi log
+
+log_event() mở server.log chế độ append.
+
+Thêm timestamp + thông tin user vừa đăng ký.
+
+Ví dụ: [2025-12-22 10:30:15] REGISTER user=user1
+
+Bước 6: Phản hồi client
+
+Nếu thành công → REGISTER_OK\n
+
+Nếu thất bại (trùng username, quá giới hạn) → REGISTER_FAIL\n
+
+Client nhận và hiển thị thông báo.
+
+3. Trạng Thái Dữ Liệu Sau REGISTER
+
+Trước:
+
+users[] = [admin]
+user_count = 1
+users.txt = admin admin123 admin admin
+
+
+Sau REGISTER user1:
+
+users[] = [admin, user1]
+user_count = 2
+users.txt = 
+admin admin123 admin admin
+user1 123456 user user1
+server.log =
+[2025-12-22 10:30:15] REGISTER user=user1
+
+4. Các Trường Hợp Lỗi
+
+Username trùng → REGISTER_FAIL
+
+Vượt MAX_USERS → REGISTER_FAIL
+
+Lỗi ghi file → user mất vĩnh viễn sau restart → cần kiểm tra fopen/fwrite
+
+5. An Toàn Luồng
+
+Mutex users_mutex bao trọn toàn bộ thao tác thêm user + lưu file + log.
+
+Ngăn race condition khi nhiều client cùng đăng ký.
+
+Ví dụ race condition nếu không mutex:
+
+Thread1 REGISTER user1      Thread2 REGISTER user2
+Check user_count=0           Check user_count=0
+Add user1                    Add user2
+save_users()                  save_users()
+→ Kết quả users.txt sai, user1 mất
+
+
+Mutex → Thread1 xong mới tới Thread2 → dữ liệu luôn đúng.

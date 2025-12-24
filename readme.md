@@ -1,3 +1,76 @@
+## Hướng dẫn chi tiết chạy trên máy B (Client)
+
+1. Copy toàn bộ thư mục project sang máy B (có thể dùng USB, mạng LAN, hoặc tải từ Git).
+2. Cài đặt trình biên dịch C (GCC/MinGW) nếu chưa có.
+3. Mở terminal/cmd, chuyển đến thư mục project, chạy lệnh:
+	```sh
+	make
+	```
+4. Xác định file thực thi client (thường là `client.exe` hoặc trong thư mục `src/`).
+5. Chạy chương trình client:
+	```sh
+	./client.exe
+	```
+	hoặc
+	```sh
+	./src/client.exe
+	```
+6. Khi chương trình yêu cầu, nhập địa chỉ IP của máy A (máy server) mà bạn đã ghi lại trước đó (ví dụ: 192.168.1.10).
+7. Nếu kết nối thành công, làm theo hướng dẫn trên màn hình để tham gia phiên đấu giá.
+
+**Lưu ý:**
+- Máy B phải kết nối cùng mạng LAN với máy A hoặc truy cập được IP của máy A.
+- Nếu không kết nối được, kiểm tra lại IP, trạng thái server, và firewall trên cả hai máy.
+## Hướng dẫn chạy project trên 2 máy khác nhau (Server - Client)
+
+### 1. Chuẩn bị
+1. Copy toàn bộ thư mục project sang cả hai máy (hoặc dùng Git clone nếu có repository).
+2. Đảm bảo cả hai máy đều đã cài đặt trình biên dịch C (GCC hoặc MinGW trên Windows).
+
+### 2. Biên dịch project
+Trên cả hai máy, mở terminal/cmd, chuyển đến thư mục project và chạy:
+```sh
+make
+```
+
+### 3. Thiết lập và chạy Server
+1. Chọn một máy làm server.
+2. Trên máy server, chạy chương trình server:
+	 - Nếu file thực thi là `server.exe` hoặc tương tự:
+		 ```sh
+		 ./server.exe
+		 ```
+	 - Hoặc:
+		 ```sh
+		 ./src/server.exe
+		 ```
+3. Ghi lại địa chỉ IP của máy server (dùng lệnh `ipconfig` trên Windows để lấy IPv4 Address).
+4. Đảm bảo firewall trên máy server đã mở port mà server sử dụng (ví dụ: 8080, 8888,...).
+
+### 4. Thiết lập và chạy Client
+1. Trên máy client, chạy chương trình client:
+	 - Nếu file thực thi là `client.exe` hoặc tương tự:
+		 ```sh
+		 ./client.exe
+		 ```
+	 - Hoặc:
+		 ```sh
+		 ./src/client.exe
+		 ```
+2. Khi được hỏi nhập địa chỉ IP server, hãy nhập IPv4 Address của máy server đã ghi ở trên.
+
+### 5. Kết nối và sử dụng
+- Client sẽ kết nối đến server qua IP và port đã cấu hình.
+- Nếu không kết nối được, kiểm tra lại:
+	- Địa chỉ IP nhập đúng chưa.
+	- Server đã chạy chưa.
+	- Port đã mở trên firewall chưa.
+
+### 6. Một số lưu ý
+- Hai máy phải cùng mạng LAN hoặc đảm bảo máy client truy cập được IP của server.
+- Nếu chạy qua Internet, cần NAT port trên router hoặc dùng các dịch vụ VPN/mạng riêng.
+
+---
 cd "/mnt/d/2025.1 chính thức/Thực hành lập trình mạng project/dau_gia_bien_so_xe/Project 2"
 
 

@@ -1,0 +1,501 @@
+Xem Lịch Sử Mua (HISTORY) - Chi Tiết Đầy Đủ
+
+=== 1. Tổng Quan Chức Năng ===
+
+Mục đích: User xem lịch sử các item đã thắng đấu giá (mua được)
+
+Thông tin lưu trữ:
+- Thời gian thắng (timestamp Unix)
+- Người thắng (username)
+- Phòng đấu giá (room_id)
+- Item (item_id, biển số)
+- Giá cuối cùng (price)
+- Phương thức (TIMEOUT / BUY_NOW)
+
+Quy trình:
+
+                        Client (user)
+                              │
+                      "HISTORY" (gửi lệnh)
+                              │
+                              ▼
+                    ┌──────────────────────┐
+                    │ Handler kiểm tra:    │
+                    │ - Login?             │
+                    └──────────┬───────────┘
+                               │
+                               ▼
+                    ┌──────────────────────┐
+                    │ send_history()       │
+                    │ - Lock mutex         │
+                    │ - Đọc history.txt    │
+                    │ - Filter by username │
+                    │ - Format dữ liệu     │
+                    │ - Unlock mutex       │
+                    └──────────┬───────────┘
+                               │
+                               ▼
+                    send(HISTORY_LIST + danh sách)
+                               │
+                               ▼
+                    Client nhận & hiển thị
+
+
+Dưới đây là **bản giải thích HISTORY được “chuẩn hoá lại”** theo đúng phong cách bạn đang làm:
+➡ **đúng code – đúng luồng – đúng tư duy backend**, nhưng **gọn, dễ nhớ, dễ thuyết trình / ghi báo cáo**.
+
+---
+
+# HISTORY – Xem Lịch Sử Mua / Thắng Đấu Giá
+
+---
+
+## 1. HISTORY dùng để làm gì?
+
+* Cho **user đã login** xem **lịch sử các item mình đã thắng**
+* Chỉ hiển thị **lịch sử của chính user**
+* Đảm bảo **privacy** (user không xem được lịch sử người khác)
+
+👉 Đây là **API read-only, cá nhân hóa theo username**
+
+---
+
+## 2. Dữ liệu lịch sử gồm những gì?
+
+Mỗi record trong lịch sử chứa:
+
+* ⏱ Thời gian thắng (Unix timestamp)
+* 👤 Username người thắng
+* 🏠 Room ID
+* 📦 Item ID + biển số
+* 💰 Giá cuối cùng
+* 🛒 Phương thức:
+
+  * `BUY_NOW`
+  * `TIMEOUT`
+
+👉 Đây là **audit log của giao dịch thành công**
+
+---
+
+## 3. Luồng tổng quát (1 câu)
+
+> User gửi `HISTORY` → server đọc `history.txt` → lọc theo username → format → gửi danh sách
+
+---
+
+## 4. Handler xử lý HISTORY (vai trò điều phối)
+
+```c
+else if (strncmp(buffer, "HISTORY", 7) == 0) {
+    if (strlen(username) == 0)
+        send(client_sock, "NEED_LOGIN\n", 11, 0);
+    else
+        send_history(client_sock, username);
+}
+```
+
+### Ý nghĩa:
+
+1. **So khớp lệnh**
+
+   * Không có tham số → đơn giản
+2. **Kiểm tra login**
+
+   * Chưa login → `NEED_LOGIN`
+3. **Gọi send_history()**
+
+   * Truyền socket + username
+   * Không kiểm tra admin (user thường dùng)
+
+👉 Handler **không đọc file**, chỉ điều hướng
+
+---
+
+## 5. send_history() – trái tim của HISTORY
+
+### Nhiệm vụ chính:
+
+* Đọc file `history.txt`
+* Lọc đúng user
+* Format dữ liệu dễ đọc
+* Gửi về client
+
+---
+
+### 5.1 Lock mutex – cực kỳ quan trọng
+
+```c
+pthread_mutex_lock(&history_mutex);
+```
+
+* Bảo vệ file I/O
+* Tránh:
+
+  * Đọc khi đang ghi
+  * Dữ liệu bị cắt nửa dòng
+
+👉 Đây là **điểm backend rất “ăn tiền”**
+
+---
+
+### 5.2 Mở file
+
+```c
+FILE *f = fopen("history.txt", "r");
+```
+
+* Mode `"r"`: chỉ đọc
+* Nếu file chưa tồn tại → `HISTORY_EMPTY`
+
+---
+
+### 5.3 Khởi tạo message
+
+```c
+char msg[4096] = "HISTORY_LIST\n";
+int found = 0;
+```
+
+* 4096 byte → đủ cho nhiều record
+* `found`: cờ kiểm tra có dữ liệu không
+
+---
+
+### 5.4 Đọc từng dòng trong file
+
+```c
+while (fscanf(...) == 7)
+```
+
+Mỗi dòng có format:
+
+```
+timestamp username room_id item_id plate price method
+```
+
+Ví dụ:
+
+```
+1764381229 user1 1 7 29B11111 500 TIMEOUT
+```
+
+---
+
+### 5.5 Filter theo username (privacy)
+
+```c
+if (strcmp(u, username) == 0)
+```
+
+* User **chỉ thấy lịch sử của chính mình**
+* Không có cách xem lịch sử người khác
+
+👉 Privacy được đảm bảo bằng **logic filter**, không phải permission phức tạp
+
+---
+
+### 5.6 Format timestamp cho con người đọc
+
+```c
+localtime() + strftime()
+```
+
+* Unix timestamp → `"YYYY-MM-DD HH:MM:SS"`
+* Dễ đọc, dễ debug
+
+---
+
+### 5.7 Format từng dòng hiển thị
+
+```c
+"%s | Room %d | Item %d | %s | Price %d | %s\n"
+```
+
+Ví dụ:
+
+```
+2024-12-29 10:20:29 | Room 1 | Item 7 | 29B11111 | Price 500 | TIMEOUT
+```
+
+---
+
+### 5.8 Kiểm tra buffer overflow
+
+```c
+if (strlen(msg) + strlen(line) < sizeof(msg) - 1)
+```
+
+* Tránh ghi tràn bộ nhớ
+* Nếu quá nhiều record → bỏ bớt (fail-safe)
+
+---
+
+### 5.9 Kết thúc
+
+* Đóng file
+* Unlock mutex
+* Nếu `found == 0` → `HISTORY_EMPTY`
+* `send()` toàn bộ message
+
+---
+
+## 6. append_history() – nơi lịch sử được tạo ra
+
+### Khi nào được gọi?
+
+Chỉ khi **item được bán thành công**
+
+---
+
+### 6.1 BUY_NOW
+
+```c
+append_history(username, room_id, it, "BUY_NOW");
+```
+
+* User chủ động mua ngay
+* Ghi lịch sử ngay lập tức
+
+---
+
+### 6.2 TIMEOUT
+
+```c
+append_history(it->leader, r->id, it, "TIMEOUT");
+```
+
+* Timer hết
+* Có leader → ghi lịch sử
+* Không có leader → bỏ qua
+
+---
+
+### 6.3 append_history() làm gì?
+
+1. Lock mutex
+2. Mở `history.txt` ở mode `"a"`
+3. Lấy timestamp hiện tại
+4. `fprintf()` thêm 1 dòng
+5. Đóng file + unlock
+
+👉 **Append-only log** – đơn giản, bền, dễ debug
+
+---
+
+## 7. Định dạng phản hồi HISTORY
+
+### Có dữ liệu:
+
+```
+HISTORY_LIST
+2024-12-29 10:20:29 | Room 1 | Item 7 | 29B11111 | Price 500 | TIMEOUT
+2025-01-02 15:30:00 | Room 2 | Item 3 | 30A12345 | Price 1000 | BUY_NOW
+```
+
+### Không có dữ liệu:
+
+```
+HISTORY_EMPTY
+```
+
+---
+
+## 8. Ý nghĩa thiết kế (rất quan trọng)
+
+* HISTORY **không phụ thuộc room**
+* HISTORY **không phụ thuộc join**
+* HISTORY **đọc từ file, không từ memory**
+
+👉 Lịch sử **không mất khi restart server**
+
+---
+
+## 9. Các vấn đề tiềm ẩn (đúng kiểu bài hệ thống)
+
+1. 📈 File history.txt phình to
+2. 📦 Buffer giới hạn (4096 byte)
+3. ❌ Không có phân trang
+4. ❌ Không xóa lịch sử
+
+👉 Nhưng với **đồ án / project học tập** → thiết kế này **rất hợp lý**
+
+---
+
+## 10. Câu kết luận “đinh”
+
+> **HISTORY là audit log chuẩn backend**:
+> append-only, thread-safe, privacy theo user, persistence qua file
+> → **Không phải bài toy, mà là thiết kế có tư duy hệ thống**
+
+Nếu bạn muốn, mình có thể:
+
+* Viết **bản thuyết trình 1–2 slide riêng cho HISTORY**
+* So sánh HISTORY này với **transaction history trong e-commerce thật**
+* Gợi ý **chuyển sang SQLite** (rất hợp bài này)
+
+Bạn cứ nói tiếp 👍
+
+
+=== 11. Flow Diagram ===
+
+┌────────────────────────────┐
+│ User thắng item            │
+│ (BUY_NOW hoặc TIMEOUT)     │
+└──────────┬─────────────────┘
+           │
+     ┌─────▼─────────────────┐
+     │ append_history()      │
+     │ ├─ Lock mutex         │
+     │ ├─ Open "a" mode      │
+     │ ├─ fprintf()          │
+     │ ├─ Close file         │
+     │ └─ Unlock mutex       │
+     └───────────────────────┘
+           │
+           │ (Lưu vào history.txt)
+           ▼
+    ┌──────────────────────┐
+    │ history.txt          │
+    │ ts u room item plate │
+    │ price method         │
+    └──────────────────────┘
+           │
+           │ (User gửi HISTORY)
+           ▼
+    ┌──────────────────────┐
+    │ send_history()       │
+    │ ├─ Lock mutex        │
+    │ ├─ Open "r" mode     │
+    │ ├─ fscanf() loop     │
+    │ ├─ Filter username   │
+    │ ├─ Format lines      │
+    │ ├─ Close file        │
+    │ ├─ Unlock mutex      │
+    │ └─ send()            │
+    └──────────┬───────────┘
+               │
+               ▼
+    ┌──────────────────────┐
+    │ Client nhận          │
+    │ HISTORY_LIST         │
+    │ 2024... | Room 1...  │
+    │ 2025... | Room 2...  │
+    └──────────────────────┘
+
+
+=== 12. Diễn Biến Chi Tiết Trong Chương Trình ===
+
+1. User mua item thành công (BUY_NOW):
+───────────────────────────────────────
+
+handler.c → BUY_NOW command
+    └─ Kiểm tra: login, room, item tồn tại, giá đủ
+    └─ Cập nhật: it->current_price, it->leader, it->status=1, it->auction_active=0
+    └─ save_items(room_id)
+    └─ append_history(username, room_id, it, "BUY_NOW")  ← Gọi
+    └─ log_event()
+    └─ broadcast SOLD message
+
+2. Timer hết (TIMEOUT):
+───────────────────────
+
+auction.c → auction_timer thread
+    └─ Duyệt tất cả phòng & item
+    └─ Kiểm tra: end_time - now <= 0
+    └─ Cập nhật: it->status=1, it->auction_active=0
+    └─ save_items(r->id)
+    └─ log_event()
+    └─ if (leader != "None") → append_history(it->leader, r->id, it, "TIMEOUT")  ← Gọi
+    └─ broadcast SOLD message
+
+3. User xem lịch sử:
+────────────────────
+
+handler.c → HISTORY command
+    └─ Kiểm tra: login
+    └─ send_history(client_sock, username)  ← Gọi
+        └─ Lock mutex
+        └─ Open history.txt
+        └─ Đọc từng dòng
+        └─ Filter username
+        └─ Format & nối vào msg
+        └─ Close file
+        └─ Unlock mutex
+        └─ send(msg)
+
+
+=== 13. So Sánh Các Phương Thức ===
+
+BUY_NOW:
+────────
+- User chủ động mua ngay với giá buy_now_price
+- Không cần đợi timer
+- Trả giá đủ → thành công ngay
+- Ghi lịch sử: method = "BUY_NOW"
+
+TIMEOUT:
+────────
+- Hệ thống tự động kết thúc khi hết giờ
+- User bid trước đó → leader
+- Timer chạy 30s (hoặc extend thêm nếu có bid cuối)
+- Ghi lịch sử: method = "TIMEOUT"
+
+
+=== 14. Vấn Đề Có Thể Xảy Ra ===
+
+Vấn đề 1: File history.txt lớn dần
+───────────────────────────────────
+
+Mỗi lần thắng → thêm 1 dòng
+Sau nhiều ngày → file rất lớn → fscanf() chậm
+
+Giải pháp:
+- Rotate log (history_old.txt, history_new.txt)
+- Hoặc dùng database (SQLite)
+
+Vấn đề 2: Buffer overflow nếu quá nhiều record
+───────────────────────────────────────────────
+
+Buffer 4096 byte → ~15-20 dòng (mỗi dòng ~200 byte)
+Nếu user thắng 100 item → chỉ hiển thị 20 dòng đầu
+
+Giải pháp:
+- Tăng buffer: char msg[16384]
+- Hoặc phân trang: HISTORY PAGE 1, HISTORY PAGE 2
+
+Vấn đề 3: Không thể xóa lịch sử
+────────────────────────────────
+
+Hiện tại không có lệnh DELETE_HISTORY
+→ Lịch sử tồn tại mãi mãi
+
+Giải pháp:
+- Thêm lệnh DELETE_HISTORY (admin)
+- Hoặc tự động xóa sau 1 năm
+
+
+=== 15. Cải Tiến Có Thể Làm ===
+
+1. Thêm filter theo phòng:
+   HISTORY ROOM 1 → Chỉ xem lịch sử phòng 1
+
+2. Thêm filter theo phương thức:
+   HISTORY BUY_NOW → Chỉ xem lịch sử BUY_NOW
+
+3. Thêm filter theo thời gian:
+   HISTORY LAST_7_DAYS → Chỉ xem 7 ngày gần đây
+
+4. Thêm phân trang:
+   HISTORY PAGE 1 → Xem trang 1 (10 dòng đầu)
+
+5. Thêm tổng tiền:
+   HISTORY_LIST
+   Total spent: 5000
+
+6. Thêm detail cho từng item:
+   HISTORY DETAIL 7 → Xem chi tiết item 7 (ai bid, giá tăng từng bước)
+
+7. Admin xem tất cả lịch sử:
+   HISTORY ALL (admin) → Xem lịch sử tất cả user
+

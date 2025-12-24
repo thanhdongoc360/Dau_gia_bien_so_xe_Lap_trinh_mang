@@ -39,13 +39,26 @@ void *recv_loop(void *arg) {
 int main() {
     struct sockaddr_in serv_addr;
     char input[BUF_SIZE];
+    char server_ip[64];
+
+int main(int argc, char *argv[]) {
+    struct sockaddr_in serv_addr;
+    char input[BUF_SIZE];
+    char *server_ip;
+
+    if (argc < 2) {
+        fprintf(stderr, "Usage: %s <server_ip>\n", argv[0]);
+        fprintf(stderr, "Ví dụ: %s 192.168.1.10\n", argv[0]);
+        return 1;
+    }
+    server_ip = argv[1];
 
     sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if (sockfd < 0) { perror("socket"); return 1; }
 
     serv_addr.sin_family = AF_INET;
     serv_addr.sin_port = htons(PORT);
-    serv_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+    serv_addr.sin_addr.s_addr = inet_addr(server_ip);
 
     if (connect(sockfd, (struct sockaddr*)&serv_addr, sizeof(serv_addr)) < 0) {
         perror("connect");
